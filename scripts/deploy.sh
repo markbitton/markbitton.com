@@ -114,18 +114,25 @@ say "Making sure the homepage links to the Loan Center"
 page=$(SOFT=1 uapi Fileman get_file_content -G --data-urlencode "dir=$DOCROOT" --data-urlencode "file=index.html")
 if [ "$(jq -r '.status' <<<"$page")" != 1 ]; then
   echo "::warning::Couldn't read index.html in $DOCROOT, so no homepage link was added."
-elif jq -r '.data.content' <<<"$page" | grep -q 'mb-loan-center-link'; then
-  say "Homepage link already there"
 else
   tmpd=$(mktemp -d)
   jq -r '.data.content' <<<"$page" > "$tmpd/index.html"
-  # Keep a copy of the untouched homepage in the private data folder.
-  uapi Fileman save_file_content --data-urlencode "dir=$HOMEDIR/loan-center-data" --data-urlencode "file=index.html.before-loan-link" \
-    --data-urlencode "content@$tmpd/index.html" >/dev/null
-  python3 scripts/add_homepage_link.py "$tmpd/index.html"
-  uapi Fileman save_file_content --data-urlencode "dir=$DOCROOT" --data-urlencode "file=index.html" \
-    --data-urlencode "content@$tmpd/index.html" >/dev/null
-  say "Added a Loan Center link to the homepage footer"
+  cp "$tmpd/index.html" "$tmpd/original.html"
+  set +e; python3 scripts/add_homepage_link.py "$tmpd/index.html"; rc=$?; set -e
+  if [ "$rc" = 3 ]; then
+    say "Homepage link already up to date"
+  elif [ "$rc" = 0 ]; then
+    if ! grep -q 'mb-loan-center-link' "$tmpd/original.html"; then
+      # Keep a copy of the untouched homepage in the private data folder.
+      uapi Fileman save_file_content --data-urlencode "dir=$HOMEDIR/loan-center-data" --data-urlencode "file=index.html.before-loan-link" \
+        --data-urlencode "content@$tmpd/original.html" >/dev/null
+    fi
+    uapi Fileman save_file_content --data-urlencode "dir=$DOCROOT" --data-urlencode "file=index.html" \
+      --data-urlencode "content@$tmpd/index.html" >/dev/null
+    say "Homepage footer now links to /loan/"
+  else
+    echo "::warning::Couldn't add the homepage link (see above)."
+  fi
 fi
 
 say "Turning on HTTPS (if it isn't already)"

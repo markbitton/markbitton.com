@@ -117,3 +117,5 @@ h2.h3 { margin-top: 28px; }
 .portal-head { margin: 36px 0 18px; }
 .portal-foot { margin-top: 30px; font-size: .85rem; }
 @media (max-width: 600px) { .ledger th, .ledger td { padding: 9px 7px; font-size: .84rem; } td.r, th.r { white-space: nowrap; } }
+.code { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: .05em; color: var(--gold-2); }
+.center { text-align: center; }

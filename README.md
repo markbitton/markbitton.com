@@ -35,7 +35,7 @@ Default is **simple interest, Actual/365**. Each loan can use Actual/360, 30/360
 
 ## Borrower view
 
-On a loan's page, **Create borrower link** makes a private, unguessable link (`/loan/?k=…`) showing that loan's balance, payoff (today or a future date) and payment history. It never shows your notes or contact info, and can't change anything. **Turn off link** or **Make a new link** stops the old link working immediately.
+The homepage footer links to **Loan Center** (`/loan/`), where a borrower types their access code (or Larry follows "Sign in here" to `/admin/`). On a loan's page, **Create borrower link** makes a private, unguessable link (`/loan/?k=…`) and a short access code showing that loan's balance, payoff (today or a future date) and payment history. It never shows your notes or contact info, and can't change anything. **Turn off link** or **Make a new link** stops the old link and code working immediately. The deploy adds the footer link to the live `index.html` once and keeps the original in `~/loan-center-data/index.html.before-loan-link`.
 
 ## Security
 

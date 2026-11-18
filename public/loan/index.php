@@ -5,6 +5,44 @@ require __DIR__ . '/../admin/lib/bootstrap.php';
 const A = '../admin/';
 
 $k = $_GET['k'] ?? '';
+
+// No link: show the Loan Center entry page (borrower access code, or Mark's sign-in).
+if ($k === '') {
+    $err = '';
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        if ($wait = lc_throttle_check('throttle-borrower.json')) {
+            $err = "Too many tries. Please wait $wait minutes.";
+        } else {
+            $code = lc_code_clean($_POST['code'] ?? '');
+            $row = null;
+            if (strlen($code) === 10) {
+                $st = db()->prepare('SELECT share_token FROM loans WHERE share_code = ? AND share_token IS NOT NULL');
+                $st->execute([$code]);
+                $row = $st->fetch();
+            }
+            if ($row) { redirect('/loan/?k=' . $row['share_token']); }
+            lc_throttle_fail('throttle-borrower.json', 10, 100);
+            usleep(300000);
+            $err = "That code didn't match a loan. Check it and try again, or ask Mark for a new one.";
+        }
+    }
+    page_head('Loan Center · Mark Bitton', false, A);
+    ?>
+    <main class="wrap narrow">
+      <form method="post" class="card stack">
+        <h1><span class="brand__mark">MB</span> Loan Center</h1>
+        <p class="muted">Borrowers: enter the access code Mark gave you to see your balance, payoff and payment history.</p>
+        <?php if ($err): ?><p class="err"><?= h($err) ?></p><?php endif; ?>
+        <label>Access code<input name="code" required autocomplete="off" autocapitalize="characters" placeholder="XXXXX-XXXXX" autofocus></label>
+        <button class="btn">View my loan</button>
+      </form>
+      <p class="muted small center">Mark? <a href="../admin/">Sign in here</a>.</p>
+    </main>
+    <?php
+    page_foot(A);
+    exit;
+}
+
 if (!is_string($k) || !preg_match('/^[a-f0-9]{48}$/', $k)) {
     http_response_code(404);
     lc_fail('This link is not valid. Please ask Mark for a new one.');

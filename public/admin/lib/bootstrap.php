@@ -78,6 +78,10 @@ function db() {
         $pdo->exec('ALTER TABLE loans ADD COLUMN share_token TEXT');
         $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS loans_share ON loans(share_token)');
     }
+    if (!in_array('share_code', $cols, true)) {
+        $pdo->exec('ALTER TABLE loans ADD COLUMN share_code TEXT');
+        $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS loans_share_code ON loans(share_code)');
+    }
     return $pdo;
 }
 
@@ -348,4 +352,16 @@ function loan_form_fields($v) {
 function share_url($token) {
     $host = $_SERVER['HTTP_HOST'] ?? 'markbitton.com';
     return (lc_is_local() ? 'http://' : 'https://') . $host . '/loan/?k=' . $token;
+}
+
+// Short access code a borrower can type on markbitton.com/loan/ (about 50 bits).
+function lc_new_code() {
+    $a = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    $c = '';
+    for ($i = 0; $i < 10; $i++) $c .= $a[random_int(0, strlen($a) - 1)];
+    return $c;
+}
+function lc_code_fmt($c) { return substr($c, 0, 5) . '-' . substr($c, 5); }
+function lc_code_clean($s) {
+    return strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string)$s));
 }

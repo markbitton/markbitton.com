@@ -85,11 +85,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $editForm = $_POST;
         $editForm['_open_more'] = true;
     } elseif ($action === 'share_on') {
-        db()->prepare('UPDATE loans SET share_token = ?, updated_at = ? WHERE id = ?')->execute([bin2hex(random_bytes(24)), now_stamp(), $id]);
+        db()->prepare('UPDATE loans SET share_token = ?, share_code = ?, updated_at = ? WHERE id = ?')->execute([bin2hex(random_bytes(24)), lc_new_code(), now_stamp(), $id]);
         flash($loan['share_token'] ? 'New borrower link made. The old link no longer works.' : 'Borrower link made. Copy it and send it to ' . $loan['borrower'] . '.');
         redirect($self);
     } elseif ($action === 'share_off') {
-        db()->prepare('UPDATE loans SET share_token = NULL, updated_at = ? WHERE id = ?')->execute([now_stamp(), $id]);
+        db()->prepare('UPDATE loans SET share_token = NULL, share_code = NULL, updated_at = ? WHERE id = ?')->execute([now_stamp(), $id]);
         flash('Borrower link turned off.');
         redirect($self);
     } elseif ($action === 'delete_loan') {
@@ -100,6 +100,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $errors[] = 'Type DELETE in capitals to delete this loan.';
     }
+}
+
+// Links made before access codes existed get a code the first time they're viewed.
+if ($loan['share_token'] && empty($loan['share_code'])) {
+    $loan['share_code'] = lc_new_code();
+    db()->prepare('UPDATE loans SET share_code = ? WHERE id = ?')->execute([$loan['share_code'], $id]);
 }
 
 $entries = load_entries($id);
@@ -220,8 +226,9 @@ page_head($loan['borrower'] . ' · Loan Center', true);
         <button type="button" class="btn btn--sm" data-copy-btn>Copy link</button>
         <a class="btn btn--sm btn--ghost" href="<?= h(share_url($loan['share_token'])) ?>" target="_blank" rel="noopener">Open</a>
       </div>
+      <p class="small">Or they can go to <strong>markbitton.com</strong>, click <em>Loan Center</em>, and enter access code <strong class="code"><?= h(lc_code_fmt($loan['share_code'])) ?></strong>.</p>
       <div class="sharerow">
-        <form method="post" action="<?= h($self) ?>" class="inline" data-confirm="Make a new link? The current link will stop working.">
+        <form method="post" action="<?= h($self) ?>" class="inline" data-confirm="Make a new link and code? The current ones will stop working.">
           <?= csrf_field() ?><input type="hidden" name="action" value="share_on"><button class="link">Make a new link</button>
         </form>
         <form method="post" action="<?= h($self) ?>" class="inline" data-confirm="Turn off the borrower link?">
