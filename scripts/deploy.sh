@@ -8,6 +8,11 @@ set -euo pipefail
 
 : "${CPANEL_HOST:?}" "${CPANEL_TOKEN:?}" "${CPANEL_USER:?}" "${SITE_DOMAIN:?}"
 
+# Secrets pasted into GitHub often pick up a trailing newline or spaces.
+trim() { printf '%s' "$1" | tr -d '[:space:]'; }
+CPANEL_HOST=$(trim "$CPANEL_HOST"); CPANEL_TOKEN=$(trim "$CPANEL_TOKEN"); CPANEL_USER=$(trim "$CPANEL_USER")
+[ -n "$CPANEL_USER" ] || CPANEL_USER=axiompdc
+
 host="${CPANEL_HOST#*://}"; host="${host%%/*}"
 [[ "$host" == *:* ]] || host="$host:2083"
 BASE="https://$host"
