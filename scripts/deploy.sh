@@ -110,6 +110,24 @@ uapi Fileman upload_files -F "dir=$DOCROOT" -F overwrite=1 -F "file-1=@$ZIP;file
 api2 Fileman fileop -d op=extract --data-urlencode "sourcefiles=$DOCROOT/release-${GITHUB_RUN_ID:-manual}.zip" --data-urlencode "destfiles=$DOCROOT" >/dev/null
 api2 Fileman fileop -d op=unlink --data-urlencode "sourcefiles=$DOCROOT/release-${GITHUB_RUN_ID:-manual}.zip" >/dev/null
 
+say "Making sure the homepage links to the Loan Center"
+page=$(SOFT=1 uapi Fileman get_file_content -G --data-urlencode "dir=$DOCROOT" --data-urlencode "file=index.html")
+if [ "$(jq -r '.status' <<<"$page")" != 1 ]; then
+  echo "::warning::Couldn't read index.html in $DOCROOT, so no homepage link was added."
+elif jq -r '.data.content' <<<"$page" | grep -q 'mb-loan-center-link'; then
+  say "Homepage link already there"
+else
+  tmpd=$(mktemp -d)
+  jq -r '.data.content' <<<"$page" > "$tmpd/index.html"
+  # Keep a copy of the untouched homepage in the private data folder.
+  uapi Fileman save_file_content --data-urlencode "dir=$HOMEDIR/loan-center-data" --data-urlencode "file=index.html.before-loan-link" \
+    --data-urlencode "content@$tmpd/index.html" >/dev/null
+  python3 scripts/add_homepage_link.py "$tmpd/index.html"
+  uapi Fileman save_file_content --data-urlencode "dir=$DOCROOT" --data-urlencode "file=index.html" \
+    --data-urlencode "content@$tmpd/index.html" >/dev/null
+  say "Added a Loan Center link to the homepage footer"
+fi
+
 say "Turning on HTTPS (if it isn't already)"
 SOFT=1 uapi SSL start_autossl_check >/dev/null || true
 
