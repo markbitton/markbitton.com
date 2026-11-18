@@ -6,6 +6,9 @@
 # Needs: CPANEL_HOST, CPANEL_TOKEN, CPANEL_USER, SITE_DOMAIN.
 set -euo pipefail
 
+say() { echo "==> $*"; }
+fail() { echo "::error::$*" >&2; exit 1; }
+
 : "${CPANEL_HOST:?}" "${CPANEL_TOKEN:?}" "${CPANEL_USER:?}" "${SITE_DOMAIN:?}"
 
 # Secrets pasted into GitHub often pick up a trailing newline or spaces.
@@ -15,11 +18,24 @@ CPANEL_HOST=$(trim "$CPANEL_HOST"); CPANEL_TOKEN=$(trim "$CPANEL_TOKEN"); CPANEL
 
 host="${CPANEL_HOST#*://}"; host="${host%%/*}"
 [[ "$host" == *:* ]] || host="$host:2083"
+
+# If the CPANEL_HOST secret doesn't resolve, find the hosting server from the
+# site's own DNS (Bluehost's reverse DNS names the server, e.g. box1234.bluehost.com).
+if ! getent hosts "${host%%:*}" >/dev/null 2>&1; then
+  h="${host%%:*}"
+  echo "::warning::CPANEL_HOST doesn't resolve (${#h} characters, $( [[ "$h" == *.* ]] && echo 'has dots' || echo 'no dots')). Looking up the server from $SITE_DOMAIN instead."
+  ip=$(getent ahostsv4 "$SITE_DOMAIN" | awk 'NR==1{print $1}')
+  rdns=$(getent hosts "$ip" | awk '{print $2}')
+  [ -n "$rdns" ] || rdns=$(dig +short -x "$ip" 2>/dev/null | sed 's/\.$//' | head -n1)
+  if [ -n "$rdns" ] && getent hosts "$rdns" >/dev/null 2>&1; then
+    host="$rdns:2083"
+    echo "Using the server that hosts $SITE_DOMAIN: $rdns"
+  else
+    fail "CPANEL_HOST doesn't resolve and the server couldn't be found from $SITE_DOMAIN (IP ${ip:-none}). Set CPANEL_HOST to the cPanel address, e.g. box1234.bluehost.com."
+  fi
+fi
 BASE="https://$host"
 AUTH="Authorization: cpanel $CPANEL_USER:$CPANEL_TOKEN"
-
-say() { echo "==> $*"; }
-fail() { echo "::error::$*" >&2; exit 1; }
 
 uapi() {
   local m=$1 f=$2; shift 2
