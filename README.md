@@ -25,6 +25,10 @@ The first deploy writes a starting password (only its bcrypt hash is in this rep
 
 Forgot the password? Delete `auth.json` from `~/loan-center-data` in cPanel File Manager and re-run the deploy action; the starting password comes back.
 
+## Admins
+
+The owner (Mark) manages admins on the **Admins** page: invite by name and email (they get a one-time link, valid 7 days, to set a password), resend an invite or send a reset link, or remove someone (signs them out everywhere). Admins sign in with email and password and can use **Forgot your password?** Emails come from `loans@markbitton.com` (set in `public/admin/lib/config.php`). Every invite or reset also shows the link on screen in case an email doesn't arrive.
+
 ## Where the data lives
 
 `~/loan-center-data/loans.sqlite` in the cPanel home folder, outside every website (the deploy creates the folder). Deploys never touch it. Back it up by downloading that file, or use **Export CSV** in the Loan Center.
@@ -34,6 +38,8 @@ Forgot the password? Delete `auth.json` from `~/loan-center-data` in cPanel File
 Default is **simple interest, Actual/365**. Each loan can use Actual/360, 30/360 or compound daily, and an optional higher default rate after maturity. Payments go to fees, then accrued interest, then principal.
 
 ## Borrower view
+
+On a loan's page, type the borrower's email and click **Email invite to borrower**: they get their private link and access code by email (replies go to the admin who sent it).
 
 The homepage footer links to **Loan Center** (`/loan/`), where a borrower types their access code (or Larry follows "Sign in here" to `/admin/`). On a loan's page, **Create borrower link** makes a private, unguessable link (`/loan/?k=…`) and a short access code showing that loan's balance, payoff (today or a future date) and payment history. It never shows your notes or contact info, and can't change anything. **Turn off link** or **Make a new link** stops the old link and code working immediately. The deploy adds the footer link to the live `index.html` once and keeps the original in `~/loan-center-data/index.html.before-loan-link`.
 

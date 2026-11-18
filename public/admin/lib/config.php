@@ -20,4 +20,12 @@ const FORCE_HTTPS = true;
 // Sign out after this many minutes without activity.
 const IDLE_MINUTES = 240;
 
+// Emails (admin invites, password resets, borrower invites) come from this
+// address. It must be on markbitton.com or Bluehost may refuse to send it.
+const MAIL_FROM_ADDRESS = 'loans@markbitton.com';
+const MAIL_FROM = 'Mark Bitton <' . MAIL_FROM_ADDRESS . '>';
+
 date_default_timezone_set('America/Denver');
+
+// Local testing only: write emails to a file instead of sending them.
+if (getenv('LC_MAIL_LOG') && PHP_SAPI === 'cli-server') define('LC_MAIL_LOG', getenv('LC_MAIL_LOG'));

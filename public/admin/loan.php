@@ -37,8 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$errors) {
             $db = db();
             $db->beginTransaction();
-            $db->prepare('INSERT INTO entries (loan_id, entry_date, type, amount_cents, note, created_at) VALUES (?,?,?,?,?,?)')
-               ->execute([$id, $date, $type, $amt, post('note'), now_stamp()]);
+            $db->prepare('INSERT INTO entries (loan_id, entry_date, type, amount_cents, note, created_at, created_by) VALUES (?,?,?,?,?,?,?)')
+               ->execute([$id, $date, $type, $amt, post('note'), now_stamp(), current_user()['id']]);
             if ($type === 'payoff') {
                 $db->prepare("UPDATE loans SET status = 'paid_off', closed_date = ?, updated_at = ? WHERE id = ?")
                    ->execute([$date, now_stamp(), $id]);
@@ -88,6 +88,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         db()->prepare('UPDATE loans SET share_token = ?, share_code = ?, updated_at = ? WHERE id = ?')->execute([bin2hex(random_bytes(24)), lc_new_code(), now_stamp(), $id]);
         flash($loan['share_token'] ? 'New borrower link made. The old link no longer works.' : 'Borrower link made. Copy it and send it to ' . $loan['borrower'] . '.');
         redirect($self);
+    } elseif ($action === 'invite_borrower') {
+        $to = post('borrower_email');
+        if (!lc_valid_email($to)) {
+            $errors[] = 'Enter a valid email address for the borrower.';
+        } else {
+            if (!$loan['share_token']) {
+                $loan['share_token'] = bin2hex(random_bytes(24));
+                $loan['share_code'] = lc_new_code();
+            } elseif (!$loan['share_code']) {
+                $loan['share_code'] = lc_new_code();
+            }
+            $ok = lc_mail($to, 'Your loan with Mark Bitton: online access',
+                "Hi {$loan['borrower']},\n\nYou can now check your loan with Mark Bitton online any time: current balance, payoff amount and payment history.\n\n"
+                . "Open your loan:\n" . share_url($loan['share_token']) . "\n\n"
+                . "Or go to markbitton.com, click \"Loan Center\" at the bottom of the page, and enter your access code: " . lc_code_fmt($loan['share_code']) . "\n\n"
+                . "Please keep this link and code private. Questions? Just reply to this email.\n\nMark Bitton\n",
+                current_user()['email'] ?? '');
+            db()->prepare('UPDATE loans SET share_token = ?, share_code = ?, borrower_email = ?, invited_at = ?, updated_at = ? WHERE id = ?')
+                ->execute([$loan['share_token'], $loan['share_code'], $to, $ok ? now_stamp() : $loan['invited_at'], now_stamp(), $id]);
+            flash($ok ? "Invite emailed to $to." : "Couldn't send the email from the server. Copy the link and code below and send them yourself.", $ok ? 'ok' : 'warn');
+            redirect($self);
+        }
     } elseif ($action === 'share_off') {
         db()->prepare('UPDATE loans SET share_token = NULL, share_code = NULL, updated_at = ? WHERE id = ?')->execute([now_stamp(), $id]);
         flash('Borrower link turned off.');
@@ -119,6 +141,15 @@ $quote = (lc_date($quoteDate) && $quoteDate >= $loan['start_date']) ? lc_compute
 
 $terms = rtrim(rtrim(number_format((float)$loan['rate'], 3), '0'), '.') . '% · ' . LC_METHODS[$loan['method']] . ' · ' . LC_DAYCOUNTS[$loan['daycount']];
 if ($loan['default_rate'] !== null) $terms .= ' · ' . rtrim(rtrim(number_format((float)$loan['default_rate'], 3), '0'), '.') . '% after maturity';
+
+function invite_form($self, $loan) {
+    $email = $loan['borrower_email'] ?: (lc_valid_email(trim($loan['contact'])) ? trim($loan['contact']) : '');
+    $sent = $loan['invited_at'] ? '<p class="small muted">Invite last emailed to ' . h($loan['borrower_email']) . ' on ' . h(nice_date(substr($loan['invited_at'], 0, 10))) . '.</p>' : '';
+    return $sent . '<form method="post" action="' . h($self) . '" class="sharerow">' . csrf_field()
+        . '<input type="hidden" name="action" value="invite_borrower">'
+        . '<input type="email" name="borrower_email" required placeholder="borrower@email.com" value="' . h($email) . '">'
+        . '<button class="btn btn--sm">' . ($loan['invited_at'] ? 'Email invite again' : 'Email invite to borrower') . '</button></form>';
+}
 
 page_head($loan['borrower'] . ' · Loan Center', true);
 ?>
@@ -227,6 +258,7 @@ page_head($loan['borrower'] . ' · Loan Center', true);
         <a class="btn btn--sm btn--ghost" href="<?= h(share_url($loan['share_token'])) ?>" target="_blank" rel="noopener">Open</a>
       </div>
       <p class="small">Or they can go to <strong>markbitton.com</strong>, click <em>Loan Center</em>, and enter access code <strong class="code"><?= h(lc_code_fmt($loan['share_code'])) ?></strong>.</p>
+      <?= invite_form($self, $loan) ?>
       <div class="sharerow">
         <form method="post" action="<?= h($self) ?>" class="inline" data-confirm="Make a new link and code? The current ones will stop working.">
           <?= csrf_field() ?><input type="hidden" name="action" value="share_on"><button class="link">Make a new link</button>
@@ -237,7 +269,8 @@ page_head($loan['borrower'] . ' · Loan Center', true);
       </div>
     <?php else: ?>
       <p class="muted small">Give <?= h($loan['borrower']) ?> a private link to check their balance, payoff and payments any time. View only.</p>
-      <form method="post" action="<?= h($self) ?>"><?= csrf_field() ?><input type="hidden" name="action" value="share_on"><button class="btn btn--sm">Create borrower link</button></form>
+      <?= invite_form($self, $loan) ?>
+      <div class="small muted sharerow">Or <form method="post" action="<?= h($self) ?>" class="inline"><?= csrf_field() ?><input type="hidden" name="action" value="share_on"><button class="link">just create the link</button></form> and send it yourself.</div>
     <?php endif; ?>
   </div>
 

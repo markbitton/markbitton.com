@@ -82,6 +82,40 @@ function db() {
         $pdo->exec('ALTER TABLE loans ADD COLUMN share_code TEXT');
         $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS loans_share_code ON loans(share_code)');
     }
+    foreach (['borrower_email TEXT', 'invited_at TEXT', 'created_by INTEGER'] as $col) {
+        if (!in_array(strtok($col, ' '), $cols, true)) $pdo->exec('ALTER TABLE loans ADD COLUMN ' . $col);
+    }
+    $ecols = array_column($pdo->query('PRAGMA table_info(entries)')->fetchAll(), 'name');
+    if (!in_array('created_by', $ecols, true)) $pdo->exec('ALTER TABLE entries ADD COLUMN created_by INTEGER');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT,
+        name TEXT NOT NULL DEFAULT \'\',
+        hash TEXT,
+        is_owner INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
+        pw_ver INTEGER NOT NULL DEFAULT 1,
+        must_change INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        last_login TEXT
+    )');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(lower(email))');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS tokens (
+        hash TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires INTEGER NOT NULL,
+        used_at TEXT,
+        created_at TEXT NOT NULL
+    )');
+    // The single-password setup from the first version becomes the owner account.
+    if (!(int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn()) {
+        $a = lc_json_read('auth.json');
+        if ($a && !empty($a['hash'])) {
+            $pdo->prepare('INSERT INTO users (email, name, hash, is_owner, pw_ver, must_change, created_at) VALUES (NULL, ?, ?, 1, ?, ?, ?)')
+                ->execute(['Mark', $a['hash'], (int)($a['ver'] ?? 1), empty($a['initial']) ? 0 : 1, date('c')]);
+        }
+    }
     return $pdo;
 }
 
@@ -116,8 +150,22 @@ function lc_session() {
 }
 
 function lc_password_set() {
+    if ((int)db()->query('SELECT COUNT(*) FROM users')->fetchColumn() > 0) return true;
     $a = lc_json_read('auth.json');
     return $a && !empty($a['hash']);
+}
+
+function current_user() {
+    static $u = false;
+    if ($u !== false) return $u;
+    lc_session();
+    $u = null;
+    if (!empty($_SESSION['uid'])) {
+        $st = db()->prepare('SELECT * FROM users WHERE id = ? AND active = 1');
+        $st->execute([(int)$_SESSION['uid']]);
+        $u = $st->fetch() ?: null;
+    }
+    return $u;
 }
 
 function lc_logged_in() {
@@ -129,9 +177,9 @@ function lc_logged_in() {
         session_regenerate_id(true);
         return false;
     }
-    // A password change signs out every other session.
-    $a = lc_json_read('auth.json');
-    if (!$a || ($a['ver'] ?? 0) !== ($_SESSION['ver'] ?? -1)) {
+    // A password change or removal signs out every other session of that person.
+    $u = current_user();
+    if (!$u || (int)$u['pw_ver'] !== (int)($_SESSION['ver'] ?? -1)) {
         $_SESSION = [];
         return false;
     }
@@ -143,13 +191,51 @@ function require_login() {
     if (!lc_password_set()) { header('Location: setup.php'); exit; }
     if (!lc_logged_in()) { header('Location: login.php'); exit; }
 }
+function require_owner() {
+    require_login();
+    if (empty(current_user()['is_owner'])) { http_response_code(403); lc_fail('Only the account owner can manage admins.'); }
+}
 
-function lc_sign_in() {
+function lc_sign_in($user) {
     lc_session();
     session_regenerate_id(true);
-    $a = lc_json_read('auth.json');
-    $_SESSION = ['uid' => 1, 'born' => time(), 'seen' => time(), 'ver' => $a['ver'] ?? 0,
+    $_SESSION = ['uid' => (int)$user['id'], 'born' => time(), 'seen' => time(), 'ver' => (int)$user['pw_ver'],
                  'csrf' => bin2hex(random_bytes(32))];
+    db()->prepare('UPDATE users SET last_login = ? WHERE id = ?')->execute([date('c'), $user['id']]);
+}
+
+// One-time links (admin invites, password resets). Only a hash is stored.
+function lc_make_token($userId, $kind, $hours) {
+    $t = bin2hex(random_bytes(24));
+    db()->prepare('DELETE FROM tokens WHERE user_id = ? AND kind = ? AND used_at IS NULL')->execute([$userId, $kind]);
+    db()->prepare('INSERT INTO tokens (hash, kind, user_id, expires, created_at) VALUES (?,?,?,?,?)')
+        ->execute([hash('sha256', $t), $kind, $userId, time() + $hours * 3600, date('c')]);
+    return $t;
+}
+function lc_find_token($t) {
+    if (!is_string($t) || !preg_match('/^[a-f0-9]{48}$/', $t)) return null;
+    $st = db()->prepare('SELECT t.*, u.email, u.name, u.hash AS user_hash FROM tokens t JOIN users u ON u.id = t.user_id
+        WHERE t.hash = ? AND t.used_at IS NULL AND t.expires > ? AND u.active = 1');
+    $st->execute([hash('sha256', $t), time()]);
+    return $st->fetch() ?: null;
+}
+function site_url($path) {
+    $host = $_SERVER['HTTP_HOST'] ?? 'markbitton.com';
+    return (lc_is_local() ? 'http://' : 'https://') . $host . $path;
+}
+
+// ---------- Email ----------
+function lc_valid_email($e) { return (bool)filter_var($e, FILTER_VALIDATE_EMAIL) && !preg_match('/[\r\n]/', $e); }
+function lc_mail($to, $subject, $body, $replyTo = '') {
+    if (!lc_valid_email($to)) return false;
+    $subject = str_replace(["\r", "\n"], ' ', $subject);
+    $headers = 'From: ' . MAIL_FROM . "\r\n" . 'Content-Type: text/plain; charset=UTF-8' . "\r\n";
+    if ($replyTo && lc_valid_email($replyTo)) $headers .= 'Reply-To: ' . $replyTo . "\r\n";
+    if (defined('LC_MAIL_LOG')) { // local testing only
+        file_put_contents(LC_MAIL_LOG, "To: $to\nSubject: $subject\n$headers\n$body\n-----\n", FILE_APPEND);
+        return true;
+    }
+    return @mail($to, '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, $headers, '-f' . MAIL_FROM_ADDRESS);
 }
 
 // Login throttling: 5 misses from one address locks it for 15 minutes;
@@ -180,10 +266,10 @@ function lc_throttle_fail($file = 'throttle.json', $perIp = 5, $global = 25) {
     $t['all'] = $g;
     lc_json_write($file, $t);
 }
-function lc_throttle_clear() {
-    $t = lc_json_read('throttle.json') ?: [];
+function lc_throttle_clear($file = 'throttle.json') {
+    $t = lc_json_read($file) ?: [];
     unset($t['ip'][hash('sha256', lc_client_ip())]);
-    lc_json_write('throttle.json', $t);
+    lc_json_write($file, $t);
 }
 
 // ---------- CSRF ----------
@@ -255,7 +341,9 @@ function page_head($title, $nav = false, $assets = '') {
     if ($nav) {
         echo '<header class="top"><div class="wrap top__in">'
            . '<a class="brand" href="index.php"><span class="brand__mark">MB</span> Loan Center</a>'
-           . '<nav><a href="index.php">Loans</a><a href="export.php">Export CSV</a><a href="password.php">Password</a>'
+           . '<nav><a href="index.php">Loans</a><a href="export.php">Export CSV</a>'
+           . (!empty(current_user()['is_owner']) ? '<a href="admins.php">Admins</a>' : '')
+           . '<a href="password.php">Account</a>'
            . '<form method="post" action="logout.php" class="inline">' . csrf_field() . '<button class="link">Sign out</button></form></nav>'
            . '</div></header>';
         $f = flash();

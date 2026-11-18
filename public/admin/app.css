@@ -119,3 +119,5 @@ h2.h3 { margin-top: 28px; }
 @media (max-width: 600px) { .ledger th, .ledger td { padding: 9px 7px; font-size: .84rem; } td.r, th.r { white-space: nowrap; } }
 .code { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: .05em; color: var(--gold-2); }
 .center { text-align: center; }
+.narrow--top { padding-top: 28px; }
+table.admins td { white-space: normal; }

@@ -9,9 +9,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     [$d, $errors] = loan_from_post();
     if (!$errors) {
         $st = db()->prepare('INSERT INTO loans (borrower, contact, collateral, principal_cents, rate, default_rate, method, daycount,
-            start_date, maturity_date, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            start_date, maturity_date, notes, created_at, updated_at, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
         $st->execute([$d['borrower'], $d['contact'], $d['collateral'], $d['principal_cents'], $d['rate'], $d['default_rate'],
-            $d['method'], $d['daycount'], $d['start_date'], $d['maturity_date'], $d['notes'], now_stamp(), now_stamp()]);
+            $d['method'], $d['daycount'], $d['start_date'], $d['maturity_date'], $d['notes'], now_stamp(), now_stamp(), current_user()['id']]);
         flash('Loan to ' . $d['borrower'] . ' added.');
         redirect('loan.php?id=' . db()->lastInsertId());
     }
@@ -36,8 +36,10 @@ $today = today();
 page_head('Loan Center', true);
 ?>
 <main class="wrap">
-  <?php $auth = lc_json_read('auth.json'); if (!empty($auth['initial'])): ?>
+  <?php $me = current_user(); if (!empty($me['must_change'])): ?>
     <p class="flash flash--warn">You're using the starting password. <a href="password.php">Change it now</a>.</p>
+  <?php elseif (empty($me['email'])): ?>
+    <p class="flash flash--warn">Add your email on the <a href="password.php">Account</a> page. You'll need it to sign in once there are other admins, and to reset a forgotten password.</p>
   <?php endif; ?>
   <div class="head">
     <h1>Loans</h1>
