@@ -9,9 +9,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($wait = lc_throttle_check()) {
         $err = "Too many failed tries. Wait $wait minute" . ($wait === 1 ? '' : 's') . ' and try again.';
     } else {
-        if ($email === '') {
-            // The original owner account has no email until one is added on the Account page.
-            $st = db()->query('SELECT * FROM users WHERE is_owner = 1 AND active = 1 AND (email IS NULL OR email = \'\') LIMIT 1');
+        if (strpos($email, '@') === false) {
+            // Blank or "admin": the owner account (the original single-password login).
+            $st = db()->query('SELECT * FROM users WHERE is_owner = 1 AND active = 1 ORDER BY id LIMIT 1');
         } else {
             $st = db()->prepare('SELECT * FROM users WHERE lower(email) = lower(?) AND active = 1');
             $st->execute([$email]);
@@ -39,7 +39,7 @@ page_head('Sign in · Loan Center');
     <h1><span class="brand__mark">MB</span> Loan Center</h1>
     <?php if ($err): ?><p class="err"><?= h($err) ?></p><?php endif; ?>
     <?= csrf_field() ?>
-    <label>Email<input type="email" name="email" value="<?= h($email) ?>" autocomplete="username" autofocus></label>
+    <label>Email or username<input type="text" name="email" value="<?= h($email) ?>" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus></label>
     <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
     <button class="btn">Sign in</button>
     <p class="small muted"><a href="forgot.php">Forgot your password?</a></p>
