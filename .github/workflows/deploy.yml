@@ -1,0 +1,51 @@
+name: deploy
+
+# Every push to main is tested, then everything in public/ is copied to
+# markbitton.com through the cPanel API (no SSH, no FTP).
+# Needs repository secrets CPANEL_HOST and CPANEL_TOKEN (CPANEL_USER optional).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+      CPANEL_TOKEN: ${{ secrets.CPANEL_TOKEN }}
+      CPANEL_USER: ${{ secrets.CPANEL_USER || 'axiompdc' }}
+      SITE_DOMAIN: markbitton.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_sqlite
+          coverage: none
+
+      - name: Test
+        run: |
+          for f in $(find public -name '*.php'); do php -l "$f" >/dev/null || exit 1; done
+          php tests/interest_test.php
+
+      - name: Check the cPanel secrets are set
+        id: gate
+        run: |
+          if [ -z "$CPANEL_HOST" ] || [ -z "$CPANEL_TOKEN" ]; then
+            echo "::notice::CPANEL_HOST and CPANEL_TOKEN secrets aren't set yet, so nothing was deployed."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to markbitton.com
+        if: steps.gate.outputs.ready == 'true'
+        run: bash scripts/deploy.sh
