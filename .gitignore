@@ -1,3 +1,4 @@
 *.sqlite
 public/admin/data/*.json
 .DS_Store
+public/admin/data/sessions/

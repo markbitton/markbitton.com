@@ -146,6 +146,16 @@ function lc_session() {
     ]);
     ini_set('session.use_strict_mode', '1');
     ini_set('session.use_only_cookies', '1');
+    // Keep sessions in the private data folder: shared hosting cleans its
+    // common session folder on its own schedule, which signs people out early.
+    $dir = lc_dir() . '/sessions';
+    if (!is_dir($dir)) @mkdir($dir, 0700, true);
+    if (is_dir($dir) && is_writable($dir)) {
+        session_save_path($dir);
+        ini_set('session.gc_maxlifetime', (string)(IDLE_MINUTES * 60));
+        ini_set('session.gc_probability', '1');
+        ini_set('session.gc_divisor', '100');
+    }
     session_start();
 }
 
@@ -281,13 +291,27 @@ function csrf_token() {
 function csrf_field() {
     return '<input type="hidden" name="csrf" value="' . h(csrf_token()) . '">';
 }
+// True when the browser says this request came from a page on this site.
+function lc_same_origin() {
+    $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
+    $src = $_SERVER['HTTP_ORIGIN'] ?? ($_SERVER['HTTP_REFERER'] ?? '');
+    if ($host === '' || $src === '' || $src === 'null') return false;
+    $h = strtolower((string)parse_url($src, PHP_URL_HOST));
+    $p = parse_url($src, PHP_URL_PORT);
+    return ($p ? "$h:$p" : $h) === $host;
+}
 function csrf_check() {
     lc_session();
     $t = $_POST['csrf'] ?? '';
-    if (!is_string($t) || empty($_SESSION['csrf']) || !hash_equals($_SESSION['csrf'], $t)) {
+    $tokenOk = is_string($t) && !empty($_SESSION['csrf']) && hash_equals($_SESSION['csrf'], $t);
+    // The session cookie is SameSite=Strict, so a form posted from this site's
+    // own pages is accepted even if the page's token went stale (e.g. after
+    // signing in again in another tab). Posts from other sites are refused.
+    if (!$tokenOk && !lc_same_origin()) {
         http_response_code(400);
         lc_fail('Your session expired. Go back, reload the page and try again.');
     }
+    if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
 }
 
 // ---------- Helpers ----------
