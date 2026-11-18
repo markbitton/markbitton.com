@@ -111,11 +111,18 @@ api2 Fileman fileop -d op=extract --data-urlencode "sourcefiles=$DOCROOT/release
 api2 Fileman fileop -d op=unlink --data-urlencode "sourcefiles=$DOCROOT/release-${GITHUB_RUN_ID:-manual}.zip" >/dev/null
 
 say "Making sure the homepage links to the Loan Center"
-page=$(SOFT=1 uapi Fileman get_file_content -G --data-urlencode "dir=$DOCROOT" --data-urlencode "file=index.html")
-if [ "$(jq -r '.status' <<<"$page")" != 1 ]; then
-  echo "::warning::Couldn't read index.html in $DOCROOT, so no homepage link was added."
+HOME_FILE=""
+for f in index.html index.htm index.php default.html; do
+  page=$(SOFT=1 uapi Fileman get_file_content -G --data-urlencode "dir=$DOCROOT" --data-urlencode "file=$f")
+  if [ "$(jq -r '.status' <<<"$page")" = 1 ]; then HOME_FILE=$f; break; fi
+done
+if [ -z "$HOME_FILE" ]; then
+  echo "::warning::Couldn't read the homepage in $DOCROOT, so no homepage link was added. cPanel said: $(jq -c '.errors' <<<"$page" 2>/dev/null | head -c 300)"
+  echo "Files in the site folder:"
+  SOFT=1 uapi Fileman list_files -G --data-urlencode "dir=$DOCROOT" | jq -r '.data[]? | "  " + .file' | head -n 40
 else
   tmpd=$(mktemp -d)
+  say "Homepage file: $HOME_FILE"
   jq -r '.data.content' <<<"$page" > "$tmpd/index.html"
   cp "$tmpd/index.html" "$tmpd/original.html"
   set +e; python3 scripts/add_homepage_link.py "$tmpd/index.html"; rc=$?; set -e
@@ -127,7 +134,7 @@ else
       uapi Fileman save_file_content --data-urlencode "dir=$HOMEDIR/loan-center-data" --data-urlencode "file=index.html.before-loan-link" \
         --data-urlencode "content@$tmpd/original.html" >/dev/null
     fi
-    uapi Fileman save_file_content --data-urlencode "dir=$DOCROOT" --data-urlencode "file=index.html" \
+    uapi Fileman save_file_content --data-urlencode "dir=$DOCROOT" --data-urlencode "file=$HOME_FILE" \
       --data-urlencode "content@$tmpd/index.html" >/dev/null
     say "Homepage footer now links to /loan/"
   else
