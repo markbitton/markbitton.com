@@ -1,6 +1,7 @@
 <?php
 // Accept an admin invite, or use a password-reset link.
 require __DIR__ . '/lib/bootstrap.php';
+lc_session(); // before any output, so the form's token is saved
 $t = $_GET['t'] ?? '';
 if ($wait = lc_throttle_check('throttle-reset.json')) lc_fail("Too many tries. Wait $wait minutes.");
 $tok = lc_find_token($t);

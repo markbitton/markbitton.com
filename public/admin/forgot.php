@@ -1,5 +1,6 @@
 <?php
 require __DIR__ . '/lib/bootstrap.php';
+lc_session(); // before any output, so the form's token is saved
 if (!lc_password_set()) redirect('setup.php');
 $sent = false; $err = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
