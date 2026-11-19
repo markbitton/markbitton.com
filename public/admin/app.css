@@ -121,3 +121,33 @@ h2.h3 { margin-top: 28px; }
 .center { text-align: center; }
 .narrow--top { padding-top: 28px; }
 table.admins td { white-space: normal; }
+/* Promissory notes */
+.notebar { margin: -6px 0 16px; }
+.mono { font: 13px/1.55 ui-monospace, Menlo, Consolas, monospace; }
+.span3 { grid-column: span 3; }
+@media (max-width: 760px) { .span3 { grid-column: 1 / -1; } }
+.doc { background: #fbfaf7; color: #1b1b1b; border-radius: 12px; padding: clamp(20px, 5vw, 56px); margin: 16px 0; font: 15px/1.65 Georgia, "Times New Roman", serif; }
+.doc p { color: #1b1b1b; margin: 0 0 1em; }
+.doc__title { font: 600 1.5rem Georgia, serif; text-align: center; letter-spacing: .08em; color: #111; margin-bottom: 1.2em; }
+.doc strong { color: #111; }
+.doc .muted, .doc small { color: #666; }
+.sigs { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 36px; }
+@media (max-width: 640px) { .sigs { grid-template-columns: 1fr; } }
+.sig__line { min-height: 70px; border-bottom: 1px solid #333; display: flex; align-items: flex-end; padding-bottom: 4px; }
+.sig__line img { max-height: 66px; max-width: 100%; }
+.sig__typed { font: italic 1.6rem "Brush Script MT", "Segoe Script", cursive; color: #10285a; }
+.sig__who { font-size: .9rem; margin-top: 6px; }
+.cert h2 { font: 600 1.05rem Georgia, serif; color: #111; }
+.cert code { font-size: .78rem; word-break: break-all; color: #333; }
+.certtable { width: 100%; border-collapse: collapse; font: 12.5px/1.4 system-ui, sans-serif; }
+.certtable th, .certtable td { color: #222; border-bottom: 1px solid #ddd; padding: 6px 8px; white-space: normal; text-align: left; }
+.sigpad { display: block; width: 100%; max-width: 600px; height: 160px; background: #fbfaf7; border-radius: 10px; margin: 6px 0; touch-action: none; cursor: crosshair; }
+.check { display: flex; gap: 10px; align-items: flex-start; color: var(--text); font-size: .9rem; }
+.check input { width: auto; margin-top: 4px; }
+@media print {
+  body { background: #fff; }
+  .top, .noprint, .flash, .crumb, script { display: none !important; }
+  .doc { background: #fff; padding: 0; margin: 0 0 24px; border-radius: 0; }
+  .cert { page-break-before: always; }
+  .wrap { max-width: none; padding: 0; }
+}

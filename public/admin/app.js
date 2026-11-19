@@ -65,3 +65,30 @@
     setTimeout(function () { btn.textContent = 'Copy link'; }, 1500);
   });
 })();
+(function () {
+  // Print buttons
+  document.querySelectorAll('[data-print]').forEach(function (b) { b.addEventListener('click', function () { window.print(); }); });
+  // Confirm on specific submit buttons
+  document.querySelectorAll('[data-confirm-click]').forEach(function (b) {
+    b.addEventListener('click', function (e) { if (!window.confirm(b.getAttribute('data-confirm-click'))) e.preventDefault(); });
+  });
+  // Signature pad
+  document.querySelectorAll('[data-sigform]').forEach(function (form) {
+    var c = form.querySelector('[data-sigpad]'), out = form.querySelector('[data-sigdata]'), clear = form.querySelector('[data-sigclear]');
+    if (!c) return;
+    var ctx = c.getContext('2d'), drawing = false, drawn = false, last = null;
+    ctx.lineWidth = 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111';
+    function pos(e) {
+      var r = c.getBoundingClientRect();
+      return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) };
+    }
+    c.addEventListener('pointerdown', function (e) { drawing = true; last = pos(e); c.setPointerCapture(e.pointerId); e.preventDefault(); });
+    c.addEventListener('pointermove', function (e) {
+      if (!drawing) return;
+      var p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; drawn = true; e.preventDefault();
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (t) { c.addEventListener(t, function () { drawing = false; }); });
+    clear.addEventListener('click', function () { ctx.clearRect(0, 0, c.width, c.height); drawn = false; out.value = ''; });
+    form.addEventListener('submit', function () { out.value = drawn ? c.toDataURL('image/png') : ''; });
+  });
+})();

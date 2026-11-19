@@ -1,11 +1,12 @@
 <?php
 require __DIR__ . '/config.php';
 require __DIR__ . '/interest.php';
+require __DIR__ . '/notes.php';
 
 // ---------- Security headers ----------
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: no-referrer');
+header('Referrer-Policy: same-origin'); // never sent to other sites; lets the browser confirm our own form posts
 header('X-Robots-Tag: noindex, nofollow');
 header('Cache-Control: no-store, no-cache, must-revalidate, private');
 header("Content-Security-Policy: default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
@@ -108,6 +109,7 @@ function db() {
         used_at TEXT,
         created_at TEXT NOT NULL
     )');
+    lc_notes_schema($pdo);
     // The single-password setup from the first version becomes the owner account.
     if (!(int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn()) {
         $a = lc_json_read('auth.json');
