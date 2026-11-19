@@ -1,0 +1,18 @@
+name: diagnose
+
+# Read-only health check of the live Loan Center (run by hand).
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+      CPANEL_TOKEN: ${{ secrets.CPANEL_TOKEN }}
+      CPANEL_USER: ${{ secrets.CPANEL_USER || 'axiompdc' }}
+      SITE_DOMAIN: markbitton.com
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/diagnose.sh
