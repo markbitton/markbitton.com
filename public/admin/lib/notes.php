@@ -71,6 +71,7 @@ function note_default_fields($loan, $user) {
         'governing_state' => 'Utah',
         'extra' => '',
         'future_advances' => '1',
+        'lender_signs' => '0',
         'max_advances' => '',
     ];
 }
@@ -207,7 +208,7 @@ function note_build($loan, $f) {
         }
         $sched = implode("\n", $lines);
     }
-    $s[] = ($n++) . ". ELECTRONIC SIGNATURES. Borrower and Lender agree that this Note may be signed electronically, that electronic signatures have the same effect as handwritten signatures under the Uniform Electronic Transactions Act and the federal E-SIGN Act, and that an electronic record of this Note is an original.";
+    $s[] = ($n++) . ". ELECTRONIC SIGNATURES. " . (($f['lender_signs'] ?? '0') === '1' ? 'Borrower and Lender agree' : 'Borrower agrees') . " that this Note may be signed electronically, that electronic signatures have the same effect as handwritten signatures under the Uniform Electronic Transactions Act and the federal E-SIGN Act, and that an electronic record of this Note is an original.";
     if (!empty($sched)) $s[] = $sched;
     return implode("\n\n", $s);
 }
@@ -251,6 +252,11 @@ function note_maybe_complete($noteId) {
     if ($amends) {
         db()->prepare("UPDATE notes SET status = 'superseded', updated_at = ? WHERE id = ? AND status = 'signed'")->execute([date('c'), (int)$amends['id']]);
         note_event((int)$amends['id'], 'superseded', 'Replaced by Amended and Restated Promissory Note MB-PN-' . (int)$noteId);
+    }
+    // When the lender didn't sign, the admin who sent the note still gets the copy.
+    if (!in_array('lender', array_column($signers, 'role'), true) && $note['created_by']) {
+        $st = db()->prepare('SELECT name, email FROM users WHERE id = ?'); $st->execute([$note['created_by']]);
+        if (($u = $st->fetch()) && $u['email']) $signers[] = ['email' => $u['email'], 'name' => $u['name'] ?: 'Mark', 'token' => null, 'role' => 'lender'];
     }
     foreach ($signers as $s) {
         if (!$s['email']) continue;

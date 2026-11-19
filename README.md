@@ -50,7 +50,7 @@ from the loan's terms; edit the fields or the text, then **Send to borrower for
 signature**. That locks the text with a SHA-256 fingerprint and emails the
 borrower a private signing link (`/loan/sign.php?t=...`). The borrower agrees to
 sign electronically, types their name and can draw a signature. The lender signs
-on the note page. When everyone has signed, both get an email, and the note
+on the note page only if "Lender also signs" is checked (off by default, since only the borrower must sign a note; on by default for amended notes). When everyone has signed, both get an email, and the note
 shows a signature certificate (times, IP addresses, fingerprint) and can be
 printed or saved as PDF. Voiding a note cancels its signing links.
 

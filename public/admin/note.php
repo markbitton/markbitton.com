@@ -46,8 +46,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tok = bin2hex(random_bytes(24));
                 $db->prepare("INSERT INTO signers (note_id, role, name, email, token) VALUES (?, 'borrower', ?, ?, ?)")
                    ->execute([$note['id'], $f['borrower_name'], $f['borrower_email'], $tok]);
-                $db->prepare("INSERT INTO signers (note_id, role, name, email, user_id) VALUES (?, 'lender', ?, ?, ?)")
-                   ->execute([$note['id'], $f['lender_name'], $me['email'], $me['id']]);
+                if ($f['lender_signs'] === '1') {
+                    $db->prepare("INSERT INTO signers (note_id, role, name, email, user_id) VALUES (?, 'lender', ?, ?, ?)")
+                       ->execute([$note['id'], $f['lender_name'], $me['email'], $me['id']]);
+                }
+                $db->prepare('UPDATE notes SET created_by = ? WHERE id = ?')->execute([$me['id'], $note['id']]);
                 $db->prepare('UPDATE loans SET borrower_email = COALESCE(borrower_email, ?) WHERE id = ?')->execute([$f['borrower_email'], $loan['id']]);
                 $db->commit();
                 note_event($note['id'], 'sent', 'Locked for signing (fingerprint ' . substr(note_hash($body), 0, 12) . '…) and sent to ' . $f['borrower_email'] . ' by ' . ($me['name'] ?: 'admin'));
@@ -55,7 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ok = lc_mail($f['borrower_email'], 'Please sign: Promissory Note for $' . note_num(note_loan_total($loan)),
                     "Hi {$f['borrower_name']},\n\n{$f['lender_name']} has sent you a" . (!empty($f['amends']) ? 'n amended' : '') . " promissory note for \$" . note_num(note_loan_total($loan)) . " to review and sign electronically.\n\n"
                     . "Review and sign here:\n$link\n\nPlease read the whole note before signing. Questions? Just reply to this email.\n", $me['email'] ?? '');
-                flash($ok ? "Sent to {$f['borrower_email']} for signature. Sign as lender below whenever you're ready."
+                flash($ok ? "Sent to {$f['borrower_email']} for signature." . ($f['lender_signs'] === '1' ? " Sign as lender below whenever you're ready." : " It's complete as soon as they sign, and you'll both get the signed copy by email.")
                           : "The note is ready for signing, but the email couldn't be sent. Copy the borrower's signing link below and send it yourself.", $ok ? 'ok' : 'warn');
                 redirect($self);
             }
@@ -81,6 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nf = $f;
         unset($nf['total_cents'], $nf['advance_count']);
         $nf['amends'] = ['id' => (int)$note['id'], 'date' => $f['note_date']];
+        $nf['lender_signs'] = '1';
         $nf['note_date'] = date('Y-m-d');
         $nf['borrower_email'] = $loan['borrower_email'] ?: $f['borrower_email'];
         db()->prepare('INSERT INTO notes (loan_id, status, fields, body, created_by, created_at, updated_at) VALUES (?, \'draft\', ?, ?, ?, ?, ?)')
@@ -154,6 +158,7 @@ page_head('Promissory note · ' . $loan['borrower'], true);
           <label class="span3">Late charge<input name="late_fee" value="<?= h($f['late_fee']) ?>" placeholder="e.g. 5% of the late payment, or $100"></label>
           <label class="span4">Secured by (blank = unsecured)<input name="security" value="<?= h($f['security']) ?>" placeholder="e.g. a Deed of Trust on the real property commonly known as 123 Main St, St. George, UT"></label>
           <label class="span2 check"><input type="hidden" name="future_advances" value="0"><input type="checkbox" name="future_advances" value="1"<?= ($f['future_advances'] ?? '') === '1' ? ' checked' : '' ?>> <span>Allow future advances under this note</span></label>
+          <label class="span4 check"><input type="hidden" name="lender_signs" value="0"><input type="checkbox" name="lender_signs" value="1"<?= ($f['lender_signs'] ?? '0') === '1' ? ' checked' : '' ?>> <span>Lender also signs (optional: only the borrower has to sign a promissory note; recommended for amended notes)</span></label>
           <label class="span2">Maximum total advances (optional)<input name="max_advances" inputmode="decimal" value="<?= h($f['max_advances'] ?? '') ?>" placeholder="blank = no cap stated"></label>
           <label class="span4">Additional terms (optional)<textarea name="extra" rows="2"><?= h($f['extra']) ?></textarea></label>
         </div>
