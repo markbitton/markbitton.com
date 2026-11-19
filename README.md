@@ -54,6 +54,12 @@ on the note page. When everyone has signed, both get an email, and the note
 shows a signature certificate (times, IP addresses, fingerprint) and can be
 printed or saved as PDF. Voiding a note cancels its signing links.
 
+The note's principal is the original amount plus every "Additional advance"
+recorded on the loan, listed in a Schedule of Advances, and it can allow future
+advances (optionally capped). If money is advanced after a note is signed, the
+note page offers **Create amended note with all advances**: an Amended and
+Restated note that replaces the old one once everyone signs it.
+
 The template is a starting point, not legal advice. Have an attorney review it.
 
 ## Security

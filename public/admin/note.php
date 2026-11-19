@@ -7,12 +7,12 @@ $errors = [];
 // note.php?loan=ID opens the loan's current note, or starts a new draft.
 if (isset($_GET['loan'])) {
     $loan = load_loan($_GET['loan']);
-    $st = db()->prepare("SELECT id FROM notes WHERE loan_id = ? AND status <> 'void' ORDER BY id DESC LIMIT 1");
+    $st = db()->prepare("SELECT id FROM notes WHERE loan_id = ? AND status NOT IN ('void', 'superseded') ORDER BY id DESC LIMIT 1");
     $st->execute([$loan['id']]);
     if ($id = $st->fetchColumn()) redirect('note.php?id=' . $id);
     $f = note_default_fields($loan, $me);
     db()->prepare('INSERT INTO notes (loan_id, status, fields, body, created_by, created_at, updated_at) VALUES (?, \'draft\', ?, ?, ?, ?, ?)')
-        ->execute([$loan['id'], json_encode($f), note_build($loan, $f), $me['id'], now_stamp(), now_stamp()]);
+        ->execute([$loan['id'], json_encode(note_snapshot($loan, $f)), note_build($loan, $f), $me['id'], now_stamp(), now_stamp()]);
     $nid = db()->lastInsertId();
     note_event($nid, 'created', 'Draft created by ' . ($me['name'] ?: 'admin'));
     redirect('note.php?id=' . $nid);
@@ -28,13 +28,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
     $a = post('action');
     if (in_array($a, ['build', 'save', 'send'], true) && $note['status'] === 'draft') {
-        foreach (array_keys($f) as $k) if (isset($_POST[$k])) $f[$k] = post($k);
+        foreach (array_keys($f) as $k) if (isset($_POST[$k]) && !in_array($k, ['amends', 'total_cents', 'advance_count'], true)) $f[$k] = post($k);
+        if ($a === 'build') $f = note_snapshot($loan, $f);
         if (!isset(NOTE_SCHEDULES[$f['schedule']])) $f['schedule'] = 'maturity';
         $body = $a === 'build' ? note_build($loan, $f) : str_replace("\r\n", "\n", (string)($_POST['body'] ?? ''));
         db()->prepare('UPDATE notes SET fields = ?, body = ?, updated_at = ? WHERE id = ?')->execute([json_encode($f), $body, now_stamp(), $note['id']]);
         if ($a === 'send') {
             if (!lc_valid_email($f['borrower_email'])) $errors[] = "Enter the borrower's email so they can be sent the signing link.";
             if (trim($f['borrower_name']) === '' || trim($f['lender_name']) === '') $errors[] = 'Enter both the borrower and lender names.';
+            if (note_outdated(['fields' => json_encode($f)] + $note, $loan)) $errors[] = 'Advances on this loan changed since the text was built. Click "Rebuild text" so the note covers all of them, then send.';
             if (preg_match('/\[[A-Z ]+\]/', $body)) $errors[] = 'The note still has a blank in [BRACKETS]. Fill it in first.';
             if (!$errors) {
                 $db = db();
@@ -50,8 +52,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $db->commit();
                 note_event($note['id'], 'sent', 'Locked for signing (fingerprint ' . substr(note_hash($body), 0, 12) . '…) and sent to ' . $f['borrower_email'] . ' by ' . ($me['name'] ?: 'admin'));
                 $link = site_url('/loan/sign.php?t=' . $tok);
-                $ok = lc_mail($f['borrower_email'], 'Please sign: Promissory Note for $' . note_num($loan['principal_cents']),
-                    "Hi {$f['borrower_name']},\n\n{$f['lender_name']} has sent you a promissory note for \$" . note_num($loan['principal_cents']) . " to review and sign electronically.\n\n"
+                $ok = lc_mail($f['borrower_email'], 'Please sign: Promissory Note for $' . note_num(note_loan_total($loan)),
+                    "Hi {$f['borrower_name']},\n\n{$f['lender_name']} has sent you a" . (!empty($f['amends']) ? 'n amended' : '') . " promissory note for \$" . note_num(note_loan_total($loan)) . " to review and sign electronically.\n\n"
                     . "Review and sign here:\n$link\n\nPlease read the whole note before signing. Questions? Just reply to this email.\n", $me['email'] ?? '');
                 flash($ok ? "Sent to {$f['borrower_email']} for signature. Sign as lender below whenever you're ready."
                           : "The note is ready for signing, but the email couldn't be sent. Copy the borrower's signing link below and send it yourself.", $ok ? 'ok' : 'warn');
@@ -72,6 +74,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash($done ? 'Signed. Everyone has signed, and both parties were emailed a copy.' : 'Signed. Waiting on the borrower.');
             redirect($self);
         }
+    } elseif ($a === 'amend' && $note['status'] === 'signed') {
+        $st = db()->prepare("SELECT id FROM notes WHERE loan_id = ? AND status IN ('draft', 'out_for_signature') AND id > ? ORDER BY id DESC LIMIT 1");
+        $st->execute([$loan['id'], $note['id']]);
+        if ($open = $st->fetchColumn()) redirect('note.php?id=' . $open);
+        $nf = $f;
+        unset($nf['total_cents'], $nf['advance_count']);
+        $nf['amends'] = ['id' => (int)$note['id'], 'date' => $f['note_date']];
+        $nf['note_date'] = date('Y-m-d');
+        $nf['borrower_email'] = $loan['borrower_email'] ?: $f['borrower_email'];
+        db()->prepare('INSERT INTO notes (loan_id, status, fields, body, created_by, created_at, updated_at) VALUES (?, \'draft\', ?, ?, ?, ?, ?)')
+            ->execute([$loan['id'], json_encode(note_snapshot($loan, $nf)), note_build($loan, $nf), $me['id'], now_stamp(), now_stamp()]);
+        $nid = db()->lastInsertId();
+        note_event($nid, 'created', 'Amended draft created by ' . ($me['name'] ?: 'admin') . ' to replace MB-PN-' . (int)$note['id']);
+        flash('Amended note started. It lists every advance on the loan. Review it, then send it to the borrower. The current note stays in force until this one is fully signed.');
+        redirect('note.php?id=' . $nid);
     } elseif ($a === 'resend' && $note['status'] === 'out_for_signature') {
         foreach (note_signers($note['id']) as $s) {
             if ($s['role'] === 'borrower' && !$s['signed_at']) {
@@ -92,7 +109,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $signers = note_signers($note['id']);
-$statusLabel = ['draft' => 'Draft', 'out_for_signature' => 'Out for signature', 'signed' => 'Signed', 'void' => 'Void'][$note['status']];
+$statusLabel = ['draft' => 'Draft', 'out_for_signature' => 'Out for signature', 'signed' => 'Signed', 'void' => 'Void', 'superseded' => 'Replaced by amended note'][$note['status']] ?? $note['status'];
+$outdated = in_array($note['status'], ['draft', 'out_for_signature', 'signed'], true) && note_outdated($note, $loan);
+$st = db()->prepare('SELECT id, status, fields, created_at FROM notes WHERE loan_id = ? AND id <> ? ORDER BY id DESC');
+$st->execute([$loan['id'], $note['id']]);
+$versions = $st->fetchAll();
+$loanTotal = note_loan_total($loan);
 page_head('Promissory note · ' . $loan['borrower'], true);
 ?>
 <main class="wrap">
@@ -101,6 +123,14 @@ page_head('Promissory note · ' . $loan['borrower'], true);
     <h1>Promissory note <span class="tag <?= $note['status'] === 'signed' ? 'tag--done' : ($note['status'] === 'void' ? 'tag--late' : 'tag--soon') ?>"><?= h($statusLabel) ?></span></h1>
   </div>
   <?php foreach ($errors as $e): ?><p class="err noprint"><?= h($e) ?></p><?php endforeach; ?>
+  <?php if ($outdated && $note['status'] === 'signed'): ?>
+    <div class="flash flash--warn noprint">This loan now has <?= money($loanTotal) ?> advanced in total, which this signed note doesn't fully list.
+      <form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="action" value="amend"><button class="btn btn--sm">Create amended note with all advances</button></form></div>
+  <?php elseif ($outdated && $note['status'] === 'out_for_signature'): ?>
+    <p class="flash flash--warn noprint">Advances on this loan changed after this note was sent. Void it below and create a new one so it lists all <?= money($loanTotal) ?>.</p>
+  <?php elseif ($outdated && $note['status'] === 'draft'): ?>
+    <p class="flash flash--warn noprint">Advances on this loan changed since this text was built. Click "Rebuild text" so the note covers all <?= money($loanTotal) ?>.</p>
+  <?php endif; ?>
 
   <?php if ($note['status'] === 'draft'): ?>
     <p class="flash flash--warn">This template is a starting point, not legal advice. Have your attorney review it once, especially the late charge, default and security terms, before you rely on it.</p>
@@ -123,9 +153,11 @@ page_head('Promissory note · ' . $loan['borrower'], true);
           <label>Late after (days)<input name="late_days" inputmode="numeric" value="<?= h($f['late_days']) ?>" placeholder="blank = no late charge"></label>
           <label class="span3">Late charge<input name="late_fee" value="<?= h($f['late_fee']) ?>" placeholder="e.g. 5% of the late payment, or $100"></label>
           <label class="span4">Secured by (blank = unsecured)<input name="security" value="<?= h($f['security']) ?>" placeholder="e.g. a Deed of Trust on the real property commonly known as 123 Main St, St. George, UT"></label>
+          <label class="span2 check"><input type="hidden" name="future_advances" value="0"><input type="checkbox" name="future_advances" value="1"<?= ($f['future_advances'] ?? '') === '1' ? ' checked' : '' ?>> <span>Allow future advances under this note</span></label>
+          <label class="span2">Maximum total advances (optional)<input name="max_advances" inputmode="decimal" value="<?= h($f['max_advances'] ?? '') ?>" placeholder="blank = no cap stated"></label>
           <label class="span4">Additional terms (optional)<textarea name="extra" rows="2"><?= h($f['extra']) ?></textarea></label>
         </div>
-        <p class="small muted">Amount, rate, interest method, maturity and default rate come from the loan itself. <a href="loan.php?id=<?= (int)$loan['id'] ?>">Edit the loan</a> to change them, then click "Rebuild text".</p>
+        <p class="small muted">The principal is the original amount plus every "Additional advance" recorded on the loan (<?= money($loanTotal) ?> now); with more than one advance, the note lists them all in a Schedule of Advances. Amount, rate, interest method, maturity and default rate come from the loan itself. <a href="loan.php?id=<?= (int)$loan['id'] ?>">Edit the loan</a> to change them, then click "Rebuild text".</p>
         <div><button class="btn btn--ghost" name="action" value="build">Rebuild text from these fields</button></div>
       </div>
       <div class="card stack">
@@ -158,6 +190,13 @@ page_head('Promissory note · ' . $loan['borrower'], true);
     <?php if ($note['status'] === 'out_for_signature'): foreach ($signers as $s): if ($s['role'] === 'lender' && !$s['signed_at']): ?>
       <div class="noprint"><?= note_sign_form(csrf_field() . '<input type="hidden" name="action" value="sign_lender">', $f['lender_name']) ?></div>
     <?php endif; endforeach; endif; ?>
+  <?php endif; ?>
+  <?php if ($versions): ?>
+    <div class="card noprint"><h3>Other versions of this note</h3><ul class="small">
+      <?php foreach ($versions as $v): $vf = json_decode($v['fields'], true) ?: []; ?>
+        <li><a href="note.php?id=<?= (int)$v['id'] ?>">MB-PN-<?= (int)$v['id'] ?></a> · <?= h(['draft' => 'Draft', 'out_for_signature' => 'Out for signature', 'signed' => 'Signed', 'void' => 'Void', 'superseded' => 'Replaced'][$v['status']] ?? $v['status']) ?>
+          <?= isset($vf['total_cents']) ? ' · ' . money($vf['total_cents']) : '' ?> · <?= h(nice_date(substr($v['created_at'], 0, 10))) ?></li>
+      <?php endforeach; ?></ul></div>
   <?php endif; ?>
 </main>
 <?php page_foot();

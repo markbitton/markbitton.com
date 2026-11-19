@@ -45,6 +45,7 @@ page_head('Promissory note · ' . $signer['name'], false, A);
   <div class="portal-head noprint">
     <p class="muted"><span class="brand__mark">MB</span>&nbsp; Promissory note from <?= h(json_decode($note['fields'], true)['lender_name'] ?? 'Mark Bitton') ?></p>
     <?php if (isset($_GET['signed'])): ?><p class="flash flash--ok">Thank you, your signature is recorded. <?= $note['status'] === 'signed' ? 'Everyone has signed, and a copy was emailed to you.' : 'You\'ll get an email with the final copy once the lender signs.' ?></p><?php endif; ?>
+    <?php if ($note['status'] === 'superseded'): ?><p class="flash flash--warn">This note has been replaced by an amended and restated promissory note. It is shown here for your records.</p><?php endif; ?>
     <?php if ($note['status'] === 'out_for_signature' && !$signer['signed_at']): ?><p class="muted">Please read the whole note, then sign at the bottom.</p><?php endif; ?>
     <div class="sharerow"><button type="button" class="btn btn--ghost btn--sm" data-print>Print / save as PDF</button>
       <?php if ($loan['share_token']): ?><a class="small" href="./?k=<?= h($loan['share_token']) ?>">View loan balance</a><?php endif; ?></div>

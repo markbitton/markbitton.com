@@ -166,7 +166,7 @@ page_head($loan['borrower'] . ' · Loan Center', true);
   </div>
 
   <?php
-    $st = db()->prepare("SELECT id, status FROM notes WHERE loan_id = ? AND status <> 'void' ORDER BY id DESC LIMIT 1");
+    $st = db()->prepare("SELECT id, status FROM notes WHERE loan_id = ? AND status NOT IN ('void', 'superseded') ORDER BY id DESC LIMIT 1");
     $st->execute([$id]);
     $pn = $st->fetch();
   ?>
@@ -176,6 +176,7 @@ page_head($loan['borrower'] . ' · Loan Center', true);
     <?php else: ?>
       <a class="btn btn--sm btn--ghost" href="note.php?id=<?= (int)$pn['id'] ?>">Promissory note</a>
       <span class="tag <?= $pn['status'] === 'signed' ? 'tag--done' : 'tag--soon' ?>"><?= h(['draft' => 'Draft', 'out_for_signature' => 'Waiting for signatures', 'signed' => 'Signed'][$pn['status']] ?? $pn['status']) ?></span>
+      <?php if (note_outdated(load_note($pn['id']), $loan)): ?><span class="tag tag--late">Doesn't list all advances</span><?php endif; ?>
     <?php endif; ?>
   </div>
 

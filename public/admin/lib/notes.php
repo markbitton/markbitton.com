@@ -70,7 +70,27 @@ function note_default_fields($loan, $user) {
         'security' => $loan['collateral'] ? 'a Deed of Trust on the real property commonly known as ' . $loan['collateral'] : '',
         'governing_state' => 'Utah',
         'extra' => '',
+        'future_advances' => '1',
+        'max_advances' => '',
     ];
+}
+
+// The loan's money out: the original principal plus every "Additional advance"
+// entry, oldest first. Each row: [date, cents, label].
+function note_advances($loan) {
+    $rows = [[$loan['start_date'], (int)$loan['principal_cents'], 'Initial advance']];
+    $st = db()->prepare("SELECT entry_date, amount_cents, note FROM entries WHERE loan_id = ? AND type = 'advance' ORDER BY entry_date, id");
+    $st->execute([$loan['id']]);
+    foreach ($st->fetchAll() as $e) $rows[] = [$e['entry_date'], (int)$e['amount_cents'], 'Additional advance'];
+    return $rows;
+}
+function note_loan_total($loan) { return array_sum(array_column(note_advances($loan), 1)); }
+
+// True when the loan's advances changed after this note's text was built.
+function note_outdated($note, $loan) {
+    $f = json_decode($note['fields'], true) ?: [];
+    if (!isset($f['total_cents'])) return note_loan_total($loan) !== (int)$loan['principal_cents'];
+    return (int)$f['total_cents'] !== note_loan_total($loan) || ($f['advance_count'] ?? 1) !== count(note_advances($loan));
 }
 
 function note_num($cents) { return number_format($cents / 100, 2); }
@@ -114,7 +134,10 @@ function note_build($loan, $f) {
     $method = $loan['method'] === 'compound'
         ? 'Interest compounds daily on unpaid principal and unpaid accrued interest'
         : 'Interest is simple interest on the unpaid principal balance and does not compound';
-    $amt = '$' . note_num($loan['principal_cents']);
+    $adv = note_advances($loan);
+    $total = array_sum(array_column($adv, 1));
+    $multi = count($adv) > 1;
+    $amt = '$' . note_num($total);
     $mat = $loan['maturity_date'] ? note_date($loan['maturity_date']) : '[MATURITY DATE]';
     $lender = $f['lender_name'] ?: '[LENDER]';
     $borrower = $f['borrower_name'] ?: '[BORROWER]';
@@ -136,13 +159,28 @@ function note_build($loan, $f) {
         : 'From and after the Maturity Date, or upon any earlier Event of Default, interest shall continue to accrue at the rate stated above until paid in full.';
 
     $s = [];
-    $s[] = "PROMISSORY NOTE";
+    $amends = $f['amends'] ?? null;
+    $s[] = $amends ? "AMENDED AND RESTATED PROMISSORY NOTE" : "PROMISSORY NOTE";
     $s[] = "Principal Amount: $amt\nDate: " . note_date($f['note_date']) . "\nPlace: " . $f['city_state'];
     $s[] = "FOR VALUE RECEIVED, the undersigned, $borrower" . ($f['borrower_address'] ? ", of {$f['borrower_address']}" : '')
          . " (\"Borrower\"), promises to pay to the order of $lender" . ($f['lender_address'] ? ", of {$f['lender_address']}" : '')
-         . " (\"Lender\"), or any later holder of this Note, the principal sum of " . note_amount_words($loan['principal_cents']) . " ($amt), together with interest as provided below.";
+         . " (\"Lender\"), or any later holder of this Note, the principal sum of " . note_amount_words($total) . " ($amt)"
+         . ($multi ? ", being the total of the advances listed in the Schedule of Advances below" : '')
+         . (($f['future_advances'] ?? '') === '1' ? ", plus any additional advances Lender makes under this Note" : '')
+         . ", together with interest as provided below.";
+    if ($amends) {
+        $s[] = "This Note amends, restates and replaces the Promissory Note dated " . note_date($amends['date']) . " between Borrower and Lender (Document ID MB-PN-" . (int)$amends['id'] . ")"
+             . ". It does not pay off or extinguish the debt evidenced by that note; all amounts outstanding under that note are now evidenced by and payable under this Note.";
+    }
     $n = 1;
-    $s[] = ($n++) . ". INTEREST. Interest accrues on the unpaid principal balance from " . note_date($loan['start_date']) . " at the rate of $rate% per annum, computed on the basis of $basis. $method.";
+    $s[] = ($n++) . ". INTEREST. Interest accrues on the unpaid principal balance"
+         . ($multi || ($f['future_advances'] ?? '') === '1' ? ", on each advance from the date it is made," : " from " . note_date($loan['start_date'])) . " at the rate of $rate% per annum, computed on the basis of $basis. $method.";
+    if (($f['future_advances'] ?? '') === '1') {
+        $max = parse_money($f['max_advances'] ?? '');
+        $s[] = ($n++) . ". ADDITIONAL ADVANCES. Lender may, but is not required to, make additional advances to Borrower under this Note"
+             . ($max ? ", provided the total of all advances does not exceed $" . note_num($max) : '')
+             . ". Each additional advance accepted by Borrower is added to the principal balance, bears interest from the date it is made, and is payable on the terms of this Note. Lender's records of advances and payments are conclusive evidence of the amounts owed, absent manifest error. Borrower and Lender may sign an amended and restated note to confirm the advances made.";
+    }
     $s[] = ($n++) . ". PAYMENT. $pay Payments shall be made in lawful money of the United States to Lender at the address above or such other place as Lender designates in writing.";
     $s[] = ($n++) . ". APPLICATION OF PAYMENTS. Each payment shall be applied first to any late charges and costs owed under this Note, then to accrued and unpaid interest, and then to principal.";
     $s[] = ($n++) . ". PREPAYMENT. Borrower may prepay this Note in whole or in part at any time without penalty. Interest accrues only through the date of payment.";
@@ -160,8 +198,25 @@ function note_build($loan, $f) {
     if (trim($f['extra']) !== '') {
         $s[] = ($n++) . ". ADDITIONAL TERMS. " . trim($f['extra']);
     }
+    if ($multi) {
+        $lines = ["SCHEDULE OF ADVANCES"];
+        $run = 0;
+        foreach ($adv as $i => [$d, $c, $label]) {
+            $run += $c;
+            $lines[] = ($i + 1) . ". " . note_date($d) . ": $" . note_num($c) . " ($label). Total advanced: $" . note_num($run);
+        }
+        $sched = implode("\n", $lines);
+    }
     $s[] = ($n++) . ". ELECTRONIC SIGNATURES. Borrower and Lender agree that this Note may be signed electronically, that electronic signatures have the same effect as handwritten signatures under the Uniform Electronic Transactions Act and the federal E-SIGN Act, and that an electronic record of this Note is an original.";
+    if (!empty($sched)) $s[] = $sched;
     return implode("\n\n", $s);
+}
+
+// Fields saved with the note so later advances can be detected.
+function note_snapshot($loan, $f) {
+    $f['total_cents'] = note_loan_total($loan);
+    $f['advance_count'] = count(note_advances($loan));
+    return $f;
 }
 
 function note_date($d) { $x = lc_date($d); return $x ? $x->format('F j, Y') : '[DATE]'; }
@@ -192,6 +247,11 @@ function note_maybe_complete($noteId) {
         ->execute([date('c'), date('c'), $noteId]);
     note_event($noteId, 'completed', 'All parties signed');
     $note = load_note($noteId);
+    $amends = (json_decode($note['fields'], true) ?: [])['amends'] ?? null;
+    if ($amends) {
+        db()->prepare("UPDATE notes SET status = 'superseded', updated_at = ? WHERE id = ? AND status = 'signed'")->execute([date('c'), (int)$amends['id']]);
+        note_event((int)$amends['id'], 'superseded', 'Replaced by Amended and Restated Promissory Note MB-PN-' . (int)$noteId);
+    }
     foreach ($signers as $s) {
         if (!$s['email']) continue;
         $link = $s['token'] ? site_url('/loan/sign.php?t=' . $s['token']) : site_url('/admin/note.php?id=' . $noteId);
